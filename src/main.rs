@@ -1,4 +1,4 @@
-// Copyright 2020 Ledger SAS
+// Copyright 2024 Ledger SAS
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,25 +15,30 @@
 #![no_std]
 #![no_main]
 
-use nanos_sdk::buttons::ButtonEvent;
-use nanos_sdk::ecc;
-use nanos_sdk::io;
-use nanos_sdk::io::ApduHeader;
-use nanos_sdk::io::{Reply, StatusWords};
-use nanos_sdk::nvm;
-use nanos_sdk::random;
-use nanos_sdk::NVMData;
-use nanos_ui::bagls;
-use nanos_ui::layout::Draw;
-use nanos_ui::ui;
+
+use ledger_secure_sdk_sys::buttons::ButtonEvent;
+use ledger_device_sdk::io;
+use ledger_device_sdk::io::{ApduHeader, Reply, StatusWords};
+use ledger_device_sdk::{ecc, nvm, NVMData};
+use ledger_device_sdk::io::Event::{Command};
+use ledger_device_sdk::random::{rand_bytes, Random};
+use ledger_device_sdk::ui::{bagls, SCREEN_HEIGHT};
 mod password;
 use heapless::Vec;
 use password::{ArrayString, PasswordItem};
 mod tinyaes;
-use core::convert::TryFrom;
 use core::mem::MaybeUninit;
 
-nanos_sdk::set_panic!(nanos_sdk::exiting_panic);
+#[cfg(feature = "pending_review_screen")]
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+use ledger_device_sdk::ui::gadgets::display_pending_review;
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+use ledger_device_sdk::ui::gadgets::{Menu, MessageValidator, popup, SingleMessage};
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+use ledger_device_sdk::ui::layout::Draw;
+
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+ledger_device_sdk::set_panic!(ledger_device_sdk::exiting_panic);
 
 /// Stores all passwords in Non-Volatile Memory
 #[link_section = ".nvm_data"]
@@ -50,25 +55,25 @@ static BIP32_PATH: [u32; 2] = ecc::make_bip32_path(b"m/10016'/0");
 const NAME: &str = env!("CARGO_PKG_NAME");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-enum Error {
-    NoConsent,
-    StorageFull,
-    EntryNotFound,
-    DecryptFailed,
+
+#[repr(u16)]
+pub enum Error {
+    NoConsent = 0x69f0_u16,
+    StorageFull = 0x9210_u16,
+    EntryNotFound = 0x6a88_u16,
+    DecryptFailed = 0x9d60_u16,
+    InsNotSupported
 }
 
-impl Into<Reply> for Error {
-    fn into(self) -> Reply {
-        match self {
-            Error::NoConsent => Reply(0x69f0_u16),
-            Error::StorageFull => Reply(0x9210_u16),
-            Error::EntryNotFound => Reply(0x6a88_u16),
-            Error::DecryptFailed => Reply(0x9d60_u16),
-        }
+
+impl From<Error> for Reply {
+    fn from(sw: Error) -> Reply {
+        Reply(sw as u16)
     }
 }
 
-enum Instruction {
+/// Possible input commands received through APDUs.
+pub enum Instruction {
     GetVersion,
     GetSize,
     Add,
@@ -86,9 +91,9 @@ enum Instruction {
 }
 
 impl TryFrom<ApduHeader> for Instruction {
-    type Error = ();
+    type Error = Error;
 
-    fn try_from(v: ApduHeader) -> Result<Self, Self::Error> {
+    fn try_from(v: ApduHeader) -> Result<Self, Error> {
         match v.ins {
             0x01 => Ok(Self::GetVersion),
             0x02 => Ok(Self::GetSize),
@@ -104,7 +109,7 @@ impl TryFrom<ApduHeader> for Instruction {
             0x0c => Ok(Self::Quit),
             0x0d => Ok(Self::ShowOnScreen),
             0x0e => Ok(Self::HasName),
-            _ => Err(()),
+            _ => Err(Self::Error::InsNotSupported),
         }
     }
 }
@@ -138,7 +143,16 @@ impl Lfsr {
 
 #[no_mangle]
 extern "C" fn sample_main() {
-    let mut comm = io::Comm::new();
+    // Create the communication manager, and configure it to accept only APDU from the 0xe0 class.
+    // If any APDU with a wrong class value is received, comm will respond automatically with
+    // BadCla status word.
+    let mut comm = io::Comm::new().set_expected_cla(0xe0);
+
+    // Developer mode / pending review popup
+    // must be cleared with user interaction
+    #[cfg(feature = "pending_review_screen")]
+    #[cfg(not(any(target_os = "stax", target_os = "flex")))]
+    display_pending_review(&mut comm);
 
     // Don't use PASSWORDS directly in the program. It is static and using
     // it requires using unsafe everytime. Instead, take a reference here, so
@@ -148,7 +162,7 @@ extern "C" fn sample_main() {
 
     // Encryption/decryption key for import and export.
     let mut enc_key = [0u8; 32];
-    let _ = ecc::bip32_derive(ecc::CurvesId::Secp256k1, &BIP32_PATH, &mut enc_key);
+    let _ = ecc::bip32_derive(ecc::CurvesId::Secp256k1, &BIP32_PATH, &mut enc_key, None);
 
     // iteration counter
     let mut c = 0;
@@ -156,20 +170,20 @@ extern "C" fn sample_main() {
     let mut lfsr = Lfsr::new(u8::random() & 0x3f, 0x30);
     loop {
         match comm.next_event() {
-            io::Event::Button(ButtonEvent::BothButtonsRelease) => nanos_sdk::exit_app(0),
+            io::Event::Button(ButtonEvent::BothButtonsRelease) => ledger_secure_sdk_sys::exit_app(0),
             io::Event::Button(ButtonEvent::RightButtonRelease) => {
                 display_infos(passwords);
                 c = 0;
             }
             io::Event::Ticker => {
-                let y_offset = ((nanos_ui::SCREEN_HEIGHT as i32) / 2) - 16;
+                let y_offset = ((SCREEN_HEIGHT as i32) / 2) - 16;
                 if c == 0 {
                     bagls::RectFull::new()
                         .pos(0, y_offset)
                         .width(8)
                         .height(8)
                         .erase();
-                    ui::SingleMessage::new("NanoPass").show();
+                    SingleMessage::new("NanoPass").show();
                     lfsr = Lfsr::new(u8::random() & 0x3f, 0x30);
                 } else if c == 128 {
                     bagls::RectFull::new()
@@ -256,7 +270,7 @@ extern "C" fn sample_main() {
 
                 match passwords.into_iter().find(|&&x| x.name == name) {
                     Some(&p) => {
-                        if ui::MessageValidator::new(
+                        if MessageValidator::new(
                             &[name.as_str()],
                             &[&"Read", &"password"],
                             &[&"Cancel"],
@@ -285,23 +299,23 @@ extern "C" fn sample_main() {
 
                 match passwords.into_iter().find(|&&x| x.name == name) {
                     Some(&p) => {
-                        if ui::MessageValidator::new(
+                        if MessageValidator::new(
                             &[name.as_str()],
                             &[&"Read", &"password"],
                             &[&"Cancel"],
                         )
-                        .ask()
+                            .ask()
                         {
-                            ui::popup(p.login.as_str());
-                            ui::popup(p.pass.as_str());
+                            popup(p.login.as_str());
+                            popup(p.pass.as_str());
                             comm.reply_ok();
                         } else {
-                            ui::popup("Operation cancelled");
+                            popup("Operation cancelled");
                             comm.reply(Error::NoConsent);
                         }
                     }
                     None => {
-                        ui::popup("Password not found");
+                        popup("Password not found");
                         comm.reply(Error::EntryNotFound);
                     }
                 }
@@ -313,7 +327,7 @@ extern "C" fn sample_main() {
                 let name = ArrayString::<32>::from_bytes(comm.get(5, 5 + 32));
                 match passwords.into_iter().position(|x| x.name == name) {
                     Some(p) => {
-                        if ui::MessageValidator::new(
+                        if MessageValidator::new(
                             &[name.as_str()],
                             &[&"Remove", &"password"],
                             &[&"Cancel"],
@@ -358,10 +372,10 @@ extern "C" fn sample_main() {
             io::Event::Command(Instruction::Clear) => {
                 // Remove all passwords
                 comm.reply::<Reply>(
-                    if ui::MessageValidator::new(&[], &[&"Remove all", &"passwords"], &[&"Cancel"])
+                    if MessageValidator::new(&[], &[&"Remove all", &"passwords"], &[&"Cancel"])
                         .ask()
                     {
-                        if ui::MessageValidator::new(&[], &[&"Are you", &"sure?"], &[&"Cancel"])
+                        if MessageValidator::new(&[], &[&"Are you", &"sure?"], &[&"Cancel"])
                             .ask()
                         {
                             passwords.clear();
@@ -378,7 +392,7 @@ extern "C" fn sample_main() {
             // Exit
             io::Event::Command(Instruction::Quit) => {
                 comm.reply_ok();
-                nanos_sdk::exit_app(0);
+                ledger_secure_sdk_sys::exit_app(0);
             }
             // HasName
             io::Event::Command(Instruction::HasName) => {
@@ -428,7 +442,7 @@ fn display_infos(passwords: &nvm::Collection<PasswordItem, 128>) {
 
     const APP_VERSION_STR: &str = concat!(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 
-    ui::Menu::new(&[APP_VERSION_STR, stored_str]).show();
+    Menu::new(&[APP_VERSION_STR, stored_str]).show();
 }
 
 /// Generates a random password.
@@ -438,7 +452,6 @@ fn display_infos(passwords: &nvm::Collection<PasswordItem, 128>) {
 /// * `dest` - An array where the result is stored. Must be at least
 ///   `size` long. No terminal zero is written.
 /// * `size` - The size of the password to be generated
-use random::Random;
 fn generate_random_password(dest: &mut [u8], size: usize) {
     for item in dest.iter_mut().take(size) {
         let rand_index = u32::random_from_range(0..PASS_CHARS.len() as u32);
@@ -477,7 +490,7 @@ fn set_password(
     return match passwords.into_iter().position(|x| x.name == *name) {
         Some(index) => {
             // A password with this name already exists.
-            if !ui::MessageValidator::new(&[name.as_str()], &[&"Update", &"password"], &[&"Cancel"])
+            if !MessageValidator::new(&[name.as_str()], &[&"Update", &"password"], &[&"Cancel"])
                 .ask()
             {
                 return Err(Error::NoConsent);
@@ -491,7 +504,7 @@ fn set_password(
         }
         None => {
             // Ask user confirmation
-            if !ui::MessageValidator::new(&[name.as_str()], &[&"Create", &"password"], &[&"Cancel"])
+            if !MessageValidator::new(&[name.as_str()], &[&"Create", &"password"], &[&"Cancel"])
                 .ask()
             {
                 return Err(Error::NoConsent);
@@ -515,7 +528,7 @@ fn export(
     enc_key: Option<&[u8; 32]>,
 ) {
     // Ask user confirmation
-    if !ui::MessageValidator::new(&[], &[&"Export", &"passwords"], &[&"Cancel"]).ask() {
+    if !MessageValidator::new(&[], &[&"Export", &"passwords"], &[&"Cancel"]).ask() {
         comm.reply(Error::NoConsent);
         return;
     }
@@ -523,7 +536,7 @@ fn export(
     // If export is in plaintext, add a warning
     let encrypted = enc_key.is_some();
     if !encrypted
-        && !ui::MessageValidator::new(&[&"Export is plaintext!"], &[&"Confirm"], &[&"Cancel"]).ask()
+        && !MessageValidator::new(&[&"Export is plaintext!"], &[&"Confirm"], &[&"Cancel"]).ask()
     {
         comm.reply(Error::NoConsent);
         return;
@@ -536,7 +549,7 @@ fn export(
 
     // We are now waiting for N APDUs to retrieve all passwords.
     // If encryption is enabled, the IV is returned during the first iteration.
-    ui::SingleMessage::new("Exporting...").show();
+    SingleMessage::new("Exporting...").show();
 
     let mut iter = passwords.into_iter();
     let mut next_item = iter.next();
@@ -548,7 +561,7 @@ fn export(
                 // If encryption is enabled, encrypt the buffer inplace.
                 if encrypted {
                     let mut nonce = [0u8; 16];
-                    random::rand_bytes(&mut nonce);
+                    rand_bytes(&mut nonce);
                     comm.append(&nonce);
                     let mut buffer: Vec<u8, 96> = Vec::new();
                     buffer.extend_from_slice(password.name.bytes()).unwrap();
@@ -618,14 +631,14 @@ fn import(
     count_bytes.copy_from_slice(comm.get(5, 5 + 4));
     let mut count = u32::from_be_bytes(count_bytes);
     // Ask user confirmation
-    if !ui::MessageValidator::new(&[], &[&"Import", &"passwords"], &[&"Cancel"]).ask() {
+    if !MessageValidator::new(&[], &[&"Import", &"passwords"], &[&"Cancel"]).ask() {
         comm.reply(Error::NoConsent);
         return;
     } else {
         comm.reply_ok();
     }
     // Wait for all items
-    ui::SingleMessage::new("Importing...").show();
+    SingleMessage::new("Importing...").show();
     while count > 0 {
         match comm.next_command() {
             // Fetch next password
