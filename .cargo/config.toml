@@ -2,7 +2,7 @@
 runner = "speculos -a=1 --model=nanosp"
 
 [build]
-target = "nanosplus"
+target = "stax"
 
 [unstable]
 build-std = ["core"]

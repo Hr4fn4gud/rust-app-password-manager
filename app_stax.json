@@ -1,18 +1,18 @@
 {
   "apiLevel": "15",
   "binary": "target/stax/release/app.hex",
-  "dataSize": 8192,
+  "dataSize": 24064,
   "derivationPath": {
     "curves": [
       "secp256k1"
     ],
     "paths": [
-      "44'/1'"
+      "10016'"
     ]
   },
   "flags": "0x200",
   "icon": "crab_32x32.gif",
-  "name": "Rust Boilerplate",
+  "name": "NanoPass",
   "targetId": "0x33200004",
-  "version": "1.2.2"
+  "version": "1.2.1"
 }
