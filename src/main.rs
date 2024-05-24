@@ -17,7 +17,7 @@
 
 
 use ledger_secure_sdk_sys::buttons::ButtonEvent;
-use ledger_device_sdk::io;
+use ledger_device_sdk::{io, nbgl};
 use ledger_device_sdk::io::{ApduHeader, Reply, StatusWords};
 use ledger_device_sdk::{ecc, nvm, NVMData};
 use ledger_device_sdk::io::Event::{Command};
@@ -32,6 +32,7 @@ use core::mem::MaybeUninit;
 use include_gif::include_gif;
 #[cfg(any(target_os = "stax", target_os = "flex"))]
 use ledger_device_sdk::nbgl::{NbglGlyph, NbglHomeAndSettings};
+use ledger_device_sdk::nbgl::{Field, NbglReview};
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
 use ledger_device_sdk::ui::bitmaps::{CERTIFICATE, DASHBOARD_X, Glyph};
 
@@ -401,7 +402,24 @@ fn validate(    message:&[&str],
 
                 cancel: &[&str]) -> bool
 {
-    true
+    let my_fields = [
+        Field {
+            name: "Amount",
+            value: "111 CRAB",
+        },
+        Field {
+            name: "Destination",
+            value: "0x1234567890ABCDEF1234567890ABCDEF12345678",
+        },
+        Field {
+            name: "Memo",
+            value: "This is a test transaction.",
+        },
+    ];
+
+    NbglReview::<32,1024>::new()
+        .titles(confirm.first().unwrap_or(&""), "subtitle", message.first().unwrap_or(&"") )
+        .show(&[])
 }
 
 
