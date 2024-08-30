@@ -9,9 +9,9 @@ cc = "1.0.73"
 bindgen = "0.59.2"
 
 [dependencies]
-ledger_device_sdk = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "feat/stax_nbgl_2" }
-ledger_secure_sdk_sys = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "feat/stax_nbgl_2" }
-include_gif = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "feat/stax_nbgl_2" }
+ledger_device_sdk = { version="1.14.0" }
+ledger_secure_sdk_sys = { version = "1.4.4" }
+include_gif = "1.2.0"
 cty = "0.2.0"
 heapless = { version = "0.7.16", default-features = false }
 
