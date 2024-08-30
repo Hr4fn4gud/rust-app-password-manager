@@ -30,6 +30,7 @@ use core::mem::MaybeUninit;
 use include_gif::include_gif;
 #[cfg(any(target_os = "stax", target_os = "flex"))]
 use ledger_device_sdk::nbgl::{NbglGlyph, NbglHomeAndSettings};
+#[cfg(any(target_os = "stax", target_os = "flex"))]
 use ledger_device_sdk::nbgl::{Field, NbglReview};
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
 use ledger_device_sdk::ui::bitmaps::{CERTIFICATE, DASHBOARD_X, Glyph};
@@ -499,7 +500,7 @@ fn display_infos(passwords: &nvm::Collection<PasswordItem, 128>, comm: &mut io::
         // The from trait allows to create different styles of pages
         // without having to use the new() function.
         &Page::from((["NanoPass", "is ready"], &APP_ICON)),
-        &Page::from((["Passwords", stored_str])),
+        &Page::from((["Passwords", stored_str], true)),
         &Page::from((["Version", env!("CARGO_PKG_VERSION")], true)),
         &Page::from(("Quit", &DASHBOARD_X)),
     ];
