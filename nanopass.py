@@ -22,7 +22,7 @@ import json
 from typing import Optional, List, Tuple
 import ledgerwallet.client
 
-MAX_NAME_LEN = 32
+MAX_NAME_LEN = 64
 MAX_LOGIN_LEN = 32
 MAX_PASS_LEN = 32
 
