@@ -31,7 +31,7 @@ use include_gif::include_gif;
 #[cfg(any(target_os = "stax", target_os = "flex"))]
 use ledger_device_sdk::nbgl::{NbglGlyph, NbglHomeAndSettings};
 #[cfg(any(target_os = "stax", target_os = "flex"))]
-use ledger_device_sdk::nbgl::{init_comm, NbglStatus, NbglChoice, NbglSpinner};
+use ledger_device_sdk::nbgl::{init_comm,  Field, InfosList, NbglGenericReview, NbglPageContent, NbglStatus, NbglChoice, NbglSpinner};
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
 use ledger_device_sdk::ui::bitmaps::{CERTIFICATE, DASHBOARD_X, Glyph};
 
@@ -99,6 +99,8 @@ pub enum Instruction {
     Quit,
     ShowOnScreen,
     HasName,
+    #[cfg(any(target_os = "stax", target_os = "flex"))]
+    ListPasswordsOnScreen,
 }
 
 impl TryFrom<ApduHeader> for Instruction {
@@ -120,6 +122,8 @@ impl TryFrom<ApduHeader> for Instruction {
             0x0c => Ok(Self::Quit),
             0x0d => Ok(Self::ShowOnScreen),
             0x0e => Ok(Self::HasName),
+            #[cfg(any(target_os = "stax", target_os = "flex"))]
+            0x0f => Ok(Self::ListPasswordsOnScreen),
             _ => Err(Error::InsNotSupported),
         }
     }
@@ -400,6 +404,36 @@ extern "C" fn sample_main() {
                         }
                     }
                     comm.reply_ok();
+                },
+                #[cfg(any(target_os = "stax", target_os = "flex"))]
+                Instruction::ListPasswordsOnScreen => {
+                    if validate(&[], &[&"List all passwords"], &[&"Confirm"], &[&"Cancel"]) {
+                        let mut index = 0;
+                        let mut review: NbglGenericReview = NbglGenericReview::new();
+                        loop {
+                            match passwords.get(index) {
+                                Some(password) => {
+                                    let my_example_fields = [
+                                        Field {
+                                            name: password.name.as_str(),
+                                            value: password.login.as_str(),
+                                        },
+                                    ];
+                                    let infos_list = InfosList::new(&my_example_fields);
+                                    review = review.add_content(NbglPageContent::InfosList(infos_list));
+                                }
+                                None => {
+                                    break;
+                                }
+                            }
+                            index += 1;
+                        }
+                        review.show("Quit");
+
+                        comm.reply_ok();
+                    } else {
+                        comm.reply(Error::NoConsent);
+                    }
                 },
             }
         };

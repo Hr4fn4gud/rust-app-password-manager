@@ -208,6 +208,9 @@ class Client:
         assert len(res) == 1
         assert res[0] in (0, 1)
         return bool(res[0])
+    
+    def list_password_on_screen(self):
+        self.dev.apdu_exchange(0x0f)
 
 
 @click.group()
@@ -314,7 +317,8 @@ def open_(ctx):
 @click.pass_context
 def quit(ctx):
     dev = ctx.obj['DEV']
-    dev.quit_app()
+    # dev.quit_app()
+    dev.list_password_on_screen()
 
 
 if __name__ == '__main__':
