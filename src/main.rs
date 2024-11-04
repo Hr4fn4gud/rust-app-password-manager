@@ -88,7 +88,7 @@ pub enum Instruction {
     GetVersion,
     GetSize,
     Add,
-    GetName,
+    GetNames,
     GetByName,
     DeleteByName,
     Export,
@@ -109,7 +109,7 @@ impl TryFrom<ApduHeader> for Instruction {
             0x01 => Ok(Self::GetVersion),
             0x02 => Ok(Self::GetSize),
             0x03 => Ok(Self::Add),
-            0x04 => Ok(Self::GetName),
+            0x04 => Ok(Self::GetNames),
             0x05 => Ok(Self::GetByName),
             0x06 => Ok(Self::DeleteByName),
             0x07 => Ok(Self::Export),
@@ -225,20 +225,24 @@ extern "C" fn sample_main() {
                     });
                     c = 0;
                 },
-                // Get password name
+                // Get list of passwords name
                 // This is used by the client to list the names of stored password
                 // Login is not returned.
-                Instruction::GetName => {
+                Instruction::GetNames => {
                     let mut index_bytes = [0; 4];
                     index_bytes.copy_from_slice(comm.get(5, 5 + 4));
                     let index = u32::from_be_bytes(index_bytes);
-                    match passwords.get(index as usize) {
-                        Some(password) => {
-                            comm.append(password.name.bytes());
-                            comm.reply_ok()
+                    for index in index..index + 4 {
+                        match passwords.get(index as usize) {
+                            Some(password) => {
+                                comm.append(password.name.bytes());
+                            }
+                            None => {
+                                break;
+                            }
                         }
-                        None => comm.reply(Error::EntryNotFound),
                     }
+                    comm.reply_ok()
                 },
                 // Get password by name
                 // Returns login and password data.
